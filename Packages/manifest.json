@@ -1,0 +1,24 @@
+{
+  "scopedRegistries": [
+    {
+      "name": "google",
+      "url": "https://package.openupm.com",
+      "scopes": [
+        "com.google"
+      ]
+    }
+  ],
+  "dependencies": {
+    "com.google.ads.mobile": "11.5.0",
+    "com.unity.device-simulator.devices": "1.0.1",
+    "com.unity.recorder": "5.1.7",
+    "com.unity.ugui": "2.0.0",
+    "com.unity.modules.androidjni": "1.0.0",
+    "com.unity.modules.audio": "1.0.0",
+    "com.unity.modules.imageconversion": "1.0.0",
+    "com.unity.modules.jsonserialize": "1.0.0",
+    "com.unity.modules.screencapture": "1.0.0",
+    "com.unity.modules.ui": "1.0.0",
+    "com.unity.modules.unitywebrequest": "1.0.0"
+  }
+}
