@@ -1,100 +1,246 @@
 using System;
 using System.Collections.Generic;
-using UnityEngine;
 using GoogleMobileAds.Api;
+using GoogleMobileAds.Common;
+using GoogleMobileAds.Ump.Api;
+using UnityEngine;
 
 namespace ArrowFlow
 {
     [Serializable]
     public class AdsConfiguration
     {
-        public string androidAppId, androidRewardedUnitId, iosAppId, iosRewardedUnitId;
+        public string androidAppId, iosAppId;
+        public string androidRewardedUnitId, iosRewardedUnitId;
+        public string androidBannerUnitId, iosBannerUnitId;
+        public string androidInterstitialUnitId, iosInterstitialUnitId;
         public string[] testDeviceIds;
     }
 
-    // Rewarded-video wrapper around the Google Mobile Ads Unity Plugin.
-    // Ad unit IDs live in Assets/Resources/AdsConfiguration.json, same pattern as TournamentConfiguration.json.
-    // Ships with Google's public test ad unit IDs so the game shows real test ads before real AdMob IDs are added.
-    // The AdMob App ID itself is set separately in the Unity editor under Assets > Google Mobile Ads > Settings;
-    // the values kept in AdsConfiguration.json are there for reference alongside the ad unit IDs.
+    // All ad state and game callbacks are serialized onto Unity's main thread.
     public static class Ads
     {
         static AdsConfiguration config;
         static RewardedAd rewarded;
-        static bool initialized, loading;
-
-        static AdsConfiguration Config
+        static InterstitialAd interstitial;
+        static BannerView banner;
+        static bool started, consentBusy, consentChecked, initializing, initialized, showing, bannerWanted;
+        static bool loadingRewarded, loadingInterstitial, loadingBanner, bannerDisplayed;
+        static float consentRetryAt, rewardedRetryAt, interstitialRetryAt, bannerRetryAt;
+        static float rewardedLoadedAt, interstitialLoadedAt, lastFullscreenAt;
+        static int generation, rewardedFailures, interstitialFailures, bannerFailures, completedLevels;
+        public static bool PrivacyOptionsRequired => ConsentInformation.PrivacyOptionsRequirementStatus == PrivacyOptionsRequirementStatus.Required;
+        public static bool Busy => showing || consentBusy;
+        public static float BannerInsetPixels => bannerDisplayed && banner != null
+            ? banner.GetHeightInPixels() + 12 : 0;
+        static bool CanLoad => initialized && !Busy && ConsentInformation.CanRequestAds();
+        public static bool RewardedReady => CanLoad && rewarded != null && Time.realtimeSinceStartup - rewardedLoadedAt < 3300 && rewarded.CanShowAd();
+        static void OnMain(Action action) => MobileAdsEventExecutor.ExecuteInUpdate(action);
+        static string Unit(string android, string ios)
         {
-            get
-            {
-                if (config == null)
-                {
-                    var asset = Resources.Load<TextAsset>("AdsConfiguration");
-                    config = asset == null ? new AdsConfiguration() : JsonUtility.FromJson<AdsConfiguration>(asset.text);
-                }
-                return config;
-            }
-        }
-
-        static string RewardedUnitId
-        {
-            get
-            {
 #if UNITY_IOS
-                return Config.iosRewardedUnitId;
+            return ios;
 #else
-                return Config.androidRewardedUnitId;
+            return android;
 #endif
-            }
         }
-
-        public static bool RewardedReady { get { return rewarded != null && rewarded.CanShowAd(); } }
+        static float RetryDelay(ref int failures) => Mathf.Min(60, 5 * Mathf.Pow(2, Mathf.Min(failures++, 4)));
 
         public static void Initialize()
         {
-            if (initialized) return;
-            initialized = true;
-            var ids = Config.testDeviceIds;
-            if (ids != null && ids.Length > 0)
-                MobileAds.SetRequestConfiguration(new RequestConfiguration { TestDeviceIds = new List<string>(ids) });
-            MobileAds.Initialize(status => LoadRewarded());
+            if (started) return;
+            started = true;
+            lastFullscreenAt = Time.realtimeSinceStartup;
+            var asset = Resources.Load<TextAsset>("AdsConfiguration");
+            config = asset == null ? new AdsConfiguration() : JsonUtility.FromJson<AdsConfiguration>(asset.text);
+            config = config ?? new AdsConfiguration();
+            if (config.testDeviceIds != null && config.testDeviceIds.Length > 0)
+                MobileAds.SetRequestConfiguration(new RequestConfiguration { TestDeviceIds = new List<string>(config.testDeviceIds) });
+            UpdateConsent();
         }
-
+        static void UpdateConsent()
+        {
+            if (Busy) return;
+            consentBusy = true;
+            DisplayBanner(false);
+            ConsentInformation.Update(new ConsentRequestParameters(), error => OnMain(() =>
+            {
+                if (error != null) { FinishConsent(error); return; }
+                ConsentForm.LoadAndShowConsentFormIfRequired(formError => OnMain(() => FinishConsent(formError)));
+            }));
+        }
+        static void FinishConsent(FormError error)
+        {
+            consentBusy = false;
+            consentChecked = error == null;
+            consentRetryAt = Time.realtimeSinceStartup + 30;
+            if (error != null) Debug.LogWarning("Ad privacy request failed: " + error.Message);
+            if (!ConsentInformation.CanRequestAds()) return;
+            if (initialized) { LoadAds(); return; }
+            if (initializing) return;
+            initializing = true;
+            MobileAds.Initialize(status => OnMain(() =>
+            {
+                initializing = false;
+                initialized = true;
+                LoadAds();
+            }));
+        }
+        public static void ShowPrivacyOptions(Action<string> done)
+        {
+            if (Busy || !PrivacyOptionsRequired) return;
+            consentBusy = true;
+            // Invalidate pending requests and cached ads made with previous privacy choices.
+            generation++;
+            loadingRewarded = loadingInterstitial = loadingBanner = false;
+            rewarded?.Destroy(); rewarded = null;
+            interstitial?.Destroy(); interstitial = null;
+            banner?.Destroy(); banner = null;
+            bannerDisplayed = false;
+            ConsentForm.ShowPrivacyOptionsForm(error => OnMain(() =>
+            {
+                FinishConsent(error);
+                done?.Invoke(error == null ? null : "Privacy options couldn't open. Please try again.");
+            }));
+        }
+        public static void Tick()
+        {
+            if (!started || Busy) return;
+            if (!consentChecked && Time.realtimeSinceStartup >= consentRetryAt) { UpdateConsent(); return; }
+            if (rewarded != null && Time.realtimeSinceStartup - rewardedLoadedAt >= 3300) { rewarded.Destroy(); rewarded = null; }
+            if (interstitial != null && Time.realtimeSinceStartup - interstitialLoadedAt >= 3300) { interstitial.Destroy(); interstitial = null; }
+            LoadAds();
+        }
+        static void LoadAds()
+        {
+            if (!CanLoad) return;
+            LoadRewarded();
+            LoadInterstitial();
+            if (bannerWanted) LoadBanner();
+        }
         static void LoadRewarded()
         {
-            string unitId = RewardedUnitId;
-            if (loading || string.IsNullOrEmpty(unitId)) return;
-            loading = true;
-            if (rewarded != null) { rewarded.Destroy(); rewarded = null; }
-            RewardedAd.Load(unitId, new AdRequest(), (RewardedAd ad, LoadAdError error) =>
+            string id = Unit(config.androidRewardedUnitId, config.iosRewardedUnitId);
+            if (loadingRewarded || rewarded != null || Time.realtimeSinceStartup < rewardedRetryAt || string.IsNullOrWhiteSpace(id)) return;
+            loadingRewarded = true;
+            int requestGeneration = generation;
+            RewardedAd.Load(id, new AdRequest(), (ad, error) => OnMain(() =>
             {
-                loading = false;
-                if (error != null || ad == null) { Debug.LogWarning("Rewarded ad failed to load: " + error); return; }
-                rewarded = ad;
-                rewarded.OnAdFullScreenContentClosed += LoadRewarded;
-                rewarded.OnAdFullScreenContentFailed += _ => LoadRewarded();
-            });
+                if (requestGeneration != generation) { ad?.Destroy(); return; }
+                loadingRewarded = false;
+                if (error != null || ad == null)
+                {
+                    ad?.Destroy();
+                    rewardedRetryAt = Time.realtimeSinceStartup + RetryDelay(ref rewardedFailures);
+                    Debug.LogWarning("Rewarded ad failed to load: " + error);
+                    return;
+                }
+                if (consentBusy || !ConsentInformation.CanRequestAds()) { ad.Destroy(); return; }
+                rewardedFailures = 0; rewarded = ad; rewardedLoadedAt = Time.realtimeSinceStartup;
+            }));
         }
-
-        // Calls done exactly once. The bool is true only if the player actually earned the reward by
-        // watching an ad through to completion. GameApp grants the life refill either way, so nobody
-        // is ever blocked on ad inventory or a bad connection - the flag only changes the status message.
-        public static void ShowRewarded(Action<bool> done)
+        static void LoadInterstitial()
         {
-            if (!initialized) Initialize();
-            var ad = rewarded;
-            if (ad != null && ad.CanShowAd())
+            string id = Unit(config.androidInterstitialUnitId, config.iosInterstitialUnitId);
+            if (loadingInterstitial || interstitial != null || Time.realtimeSinceStartup < interstitialRetryAt || string.IsNullOrWhiteSpace(id)) return;
+            loadingInterstitial = true;
+            int requestGeneration = generation;
+            InterstitialAd.Load(id, new AdRequest(), (ad, error) => OnMain(() =>
             {
-                bool earned = false, finished = false;
-                ad.OnAdFullScreenContentClosed += () => { if (!finished) { finished = true; done(earned); } };
-                ad.OnAdFullScreenContentFailed += _ => { if (!finished) { finished = true; done(false); } };
-                ad.Show(reward => earned = true);
-            }
-            else
+                if (requestGeneration != generation) { ad?.Destroy(); return; }
+                loadingInterstitial = false;
+                if (error != null || ad == null)
+                {
+                    ad?.Destroy();
+                    interstitialRetryAt = Time.realtimeSinceStartup + RetryDelay(ref interstitialFailures);
+                    Debug.LogWarning("Interstitial ad failed to load: " + error);
+                    return;
+                }
+                if (consentBusy || !ConsentInformation.CanRequestAds()) { ad.Destroy(); return; }
+                interstitialFailures = 0; interstitial = ad; interstitialLoadedAt = Time.realtimeSinceStartup;
+            }));
+        }
+        public static void SetBannerVisible(bool visible)
+        {
+            bannerWanted = visible;
+            if (!visible || !CanLoad) DisplayBanner(false);
+            else LoadBanner();
+        }
+        static void DisplayBanner(bool visible)
+        {
+            if (banner == null || bannerDisplayed == visible) return;
+            bannerDisplayed = visible;
+            if (visible) banner.Show(); else banner.Hide();
+        }
+        static void LoadBanner()
+        {
+            if (banner != null) { if (!loadingBanner) DisplayBanner(true); return; }
+            string id = Unit(config.androidBannerUnitId, config.iosBannerUnitId);
+            if (Time.realtimeSinceStartup < bannerRetryAt || string.IsNullOrWhiteSpace(id)) return;
+            var view = new BannerView(id, AdSize.Banner, AdPosition.Bottom);
+            banner = view;
+            loadingBanner = true;
+            view.Hide();
+            view.OnBannerAdLoaded += () => OnMain(() =>
             {
-                LoadRewarded();
-                done(false);
+                if (banner != view) return;
+                loadingBanner = false; bannerFailures = 0;
+                DisplayBanner(bannerWanted && CanLoad);
+            });
+            view.OnBannerAdLoadFailed += error => OnMain(() =>
+            {
+                if (banner != view) return;
+                loadingBanner = false; view.Destroy(); banner = null; bannerDisplayed = false;
+                bannerRetryAt = Time.realtimeSinceStartup + RetryDelay(ref bannerFailures);
+                Debug.LogWarning("Banner failed to load: " + error);
+            });
+            view.LoadAd(new AdRequest());
+        }
+        public static void LevelCompleted() { completedLevels++; }
+        public static void ShowInterstitialBetweenLevels(Action done)
+        {
+            if (!CanLoad || completedLevels < 3 || Time.realtimeSinceStartup - lastFullscreenAt < 120
+                || interstitial == null || Time.realtimeSinceStartup - interstitialLoadedAt >= 3300 || !interstitial.CanShowAd())
+            { done?.Invoke(); return; }
+            var ad = interstitial; interstitial = null;
+            showing = true; DisplayBanner(false); completedLevels = 0;
+            bool finished = false;
+            Action finish = () =>
+            {
+                if (finished) return;
+                finished = true; showing = false; lastFullscreenAt = Time.realtimeSinceStartup;
+                ad.Destroy(); done?.Invoke(); LoadAds();
+            };
+            ad.OnAdFullScreenContentClosed += () => OnMain(finish);
+            ad.OnAdFullScreenContentFailed += error => OnMain(finish);
+            try { ad.Show(); }
+            catch (Exception error) { Debug.LogWarning("Interstitial couldn't open: " + error.Message); finish(); }
+        }
+        // Reward delivery is independent of dismissal and only follows the SDK reward event.
+        public static void ShowRewarded(Action earnReward, Action<bool> closed)
+        {
+            Initialize();
+            if (!RewardedReady) { closed?.Invoke(false); return; }
+            var ad = rewarded; rewarded = null;
+            showing = true; DisplayBanner(false);
+            bool earned = false, finished = false;
+            Action finish = () =>
+            {
+                if (finished) return;
+                finished = true; showing = false; lastFullscreenAt = Time.realtimeSinceStartup;
+                ad.Destroy(); closed?.Invoke(earned); LoadAds();
+            };
+            ad.OnAdFullScreenContentClosed += () => OnMain(finish);
+            ad.OnAdFullScreenContentFailed += error => OnMain(finish);
+            try
+            {
+                ad.Show(reward => OnMain(() =>
+                {
+                    if (earned) return;
+                    earned = true; earnReward?.Invoke();
+                }));
             }
+            catch (Exception error) { Debug.LogWarning("Rewarded ad couldn't open: " + error.Message); finish(); }
         }
     }
 }

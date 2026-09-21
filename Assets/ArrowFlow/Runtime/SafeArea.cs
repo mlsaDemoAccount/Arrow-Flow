@@ -10,6 +10,11 @@ namespace ArrowFlow
         {
             if (Screen.width <= 0 || Screen.height <= 0) return;
             Rect area = Screen.safeArea;
+            if (Application.isPlaying)
+            {
+                float inset = Mathf.Min(Ads.BannerInsetPixels, area.height * .25f);
+                area.yMin += inset;
+            }
             Vector2 size = new Vector2(Screen.width, Screen.height);
             var r = (RectTransform)transform;
             Vector2 min = area.position / size, max = (area.position + area.size) / size;

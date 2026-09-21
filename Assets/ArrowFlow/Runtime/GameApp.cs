@@ -18,7 +18,8 @@ namespace ArrowFlow
         string mode, key, dialog;
         int level, levelPage, screenVersion;
         DateTime puzzleDate, calendarMonth;
-        bool playing, transitioning, submitting, deleting;
+        bool playing, transitioning, submitting, deleting, refilling, advancing;
+        string currentScreen;
         TournamentEvent tournament;
         AudioClip goodTone, badTone;
 
@@ -37,8 +38,11 @@ namespace ArrowFlow
         }
         void Update()
         {
+            Ads.Tick();
+            if (dialog == "Fail" && !refilling) UpdateRefillButton();
+            if (dialog == "About") ui.Active("About/Privacy", Ads.PrivacyOptionsRequired);
             if (!Input.GetKeyDown(KeyCode.Escape)) return;
-            if (deleting || submitting) return;
+            if (deleting || submitting || refilling || advancing || Ads.Busy) return;
             if (dialog != null && !(playing && (transitioning || attempt.lives == 0))) CloseDialog();
             else Home();
         }
@@ -49,19 +53,23 @@ namespace ArrowFlow
         {
             screenVersion++; CloseDialog(); playing = false; transitioning = false;
             ui.ShowScreen(name);
+            currentScreen = name;
+            Ads.SetBannerVisible(name != "Game");
         }
         void Dialog(string name)
         {
             dialog = name; ui.ShowDialog(name); board.interactive = false;
+            Ads.SetBannerVisible(false);
         }
         public void CloseDialog()
         {
-            if (submitting || deleting) return;
+            if (submitting || deleting || refilling || advancing) return;
             dialog = null; ui.ShowDialog(null); board.interactive = true;
+            Ads.SetBannerVisible(currentScreen != "Game");
         }
         public void Home()
         {
-            if (submitting || deleting) return;
+            if (submitting || deleting || refilling || advancing) return;
             Persist(); Screen("Home");
             int current = Math.Min(Levels.CampaignCount, progress.unlocked);
             bool resume = progress.attempts.Any(a => a.key == "campaign:" + current);
@@ -71,7 +79,15 @@ namespace ArrowFlow
         public void ShowDaily() { Calendar(DateTime.Today); }
         public void ShowLevels() { LevelMenu((Math.Min(Levels.CampaignCount, progress.unlocked) - 1) / 30); }
         public void ShowTutorial() { Dialog("Tutorial"); }
-        public void ShowAbout() { Dialog("About"); }
+        public void ShowAbout() { Dialog("About"); ui.Active("About/Privacy", Ads.PrivacyOptionsRequired); }
+        public void ShowAdPrivacy()
+        {
+            Ads.ShowPrivacyOptions(error =>
+            {
+                if (this == null) return;
+                if (error != null) ui.Text("About/Body", error);
+            });
+        }
         public void RequestRestart() { Dialog("Restart"); }
         public void RequestDeleteProgress() { Dialog("Delete"); }
         public void FitView() { board.ResetView(); }
@@ -127,17 +143,43 @@ namespace ArrowFlow
         }
         void ShowFail()
         {
-            ui.Interactable("Fail/Refill", true);
-            ui.Text("Fail/Refill/Label", Ads.RewardedReady ? "Watch ad — refill" : "Refill");
+            UpdateRefillButton();
             Dialog("Fail");
+        }
+        void UpdateRefillButton()
+        {
+            bool ready = Ads.RewardedReady;
+            ui.Interactable("Fail/Refill", ready);
+            ui.Text("Fail/Refill/Label", ready ? "Watch ad — refill 3 lives" : "Ad unavailable — try again soon");
         }
         public void RefillLives()
         {
+            if (refilling || !playing || dialog != "Fail" || attempt.lives > 0 || !Ads.RewardedReady) return;
+            refilling = true;
+            var refillAttempt = attempt;
+            int version = screenVersion;
             ui.Interactable("Fail/Refill", false);
-            Ads.ShowRewarded(rewarded =>
+            Ads.ShowRewarded(() =>
             {
-                attempt.lives = 3; UpdateHUD(); Persist(); CloseDialog();
-                ui.Text("Game/Status", rewarded ? "Refilled — thanks for watching!" : "Refilled — no ad was available this time.");
+                if (this == null || !progress.attempts.Contains(refillAttempt)) return;
+                refillAttempt.lives = 3; Persist();
+                if (screenVersion == version && attempt == refillAttempt)
+                {
+                    UpdateHUD();
+                    // Some mediated providers can deliver the reward after dismissal.
+                    if (!refilling && dialog == "Fail")
+                    {
+                        CloseDialog();
+                        ui.Text("Game/Status", "Refilled — thanks for watching!");
+                    }
+                }
+            }, earned =>
+            {
+                if (this == null) return;
+                refilling = false;
+                if (screenVersion != version || attempt != refillAttempt) return;
+                if (earned) { CloseDialog(); ui.Text("Game/Status", "Refilled — thanks for watching!"); }
+                else { UpdateRefillButton(); ui.Text("Game/Status", "Ad wasn't completed. Watch an ad to refill, or restart."); }
             });
         }
         public void RestartPuzzle() { progress.attempts.RemoveAll(a => a.key == key); Persist(); Play(mode, level, puzzleDate); }
@@ -145,12 +187,26 @@ namespace ArrowFlow
         {
             transitioning = true;
             if (mode == "tournament") { RetrySubmission(); return; }
+            Ads.LevelCompleted();
             progress.Complete(mode, level, puzzleDate, key); Persist();
             ui.Text("Win/Body", mode == "daily" ? "Daily star collected.\nAnother small moment of clarity." : mode == "weekly" ? "One more puzzle toward your weekly medal." : "Every arrow found its way.");
             ui.Text("Win/Next/Label", mode == "campaign" && level < 500 ? "Next level" : mode == "weekly" ? "Next puzzle" : "Back home");
             Dialog("Win");
         }
         public void NextPuzzle()
+        {
+            if (advancing || dialog != "Win") return;
+            advancing = true;
+            ui.Interactable("Win/Next", false);
+            Ads.ShowInterstitialBetweenLevels(() =>
+            {
+                if (this == null) return;
+                advancing = false;
+                ui.Interactable("Win/Next", true);
+                ContinueAfterWin();
+            });
+        }
+        void ContinueAfterWin()
         {
             if (mode == "campaign" && level < 500) Play(mode, level + 1, puzzleDate);
             else if (mode == "weekly") Play(mode, progress.WeeklyCount(puzzleDate) + 1, puzzleDate);
@@ -297,5 +353,3 @@ namespace ArrowFlow
         }
     }
 }
-
-

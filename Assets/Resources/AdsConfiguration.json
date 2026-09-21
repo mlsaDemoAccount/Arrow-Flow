@@ -1,7 +1,11 @@
 {
-  "androidAppId": "ca-app-pub-6791204400580767~7255767898",
-  "androidRewardedUnitId": "ca-app-pub-3940256099942544/5224354917",
-  "iosAppId": "ca-app-pub-3940256099942544~1458002511",
-  "iosRewardedUnitId": "ca-app-pub-3940256099942544/1712485313",
+  "androidAppId": "ca-app-pub-6588216680762223~3892056190",
+  "androidRewardedUnitId": "ca-app-pub-6588216680762223/5233058020",
+  "iosAppId": "ca-app-pub-6588216680762223~5730470210",
+  "iosRewardedUnitId": "ca-app-pub-6588216680762223/1507409310",
+  "androidBannerUnitId": "ca-app-pub-6588216680762223/2749083652",
+  "iosBannerUnitId": "ca-app-pub-6588216680762223/7242862432",
+  "androidInterstitialUnitId": "ca-app-pub-6588216680762223/1647010110",
+  "iosInterstitialUnitId": "ca-app-pub-6588216680762223/2379663977",
   "testDeviceIds": []
 }
