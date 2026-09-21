@@ -50,6 +50,8 @@ namespace ArrowFlow
         {
             if (started) return;
             started = true;
+            // Consent callbacks are dispatched before MobileAds.Initialize creates its executor.
+            MobileAdsEventExecutor.Initialize();
             lastFullscreenAt = Time.realtimeSinceStartup;
             var asset = Resources.Load<TextAsset>("AdsConfiguration");
             config = asset == null ? new AdsConfiguration() : JsonUtility.FromJson<AdsConfiguration>(asset.text);

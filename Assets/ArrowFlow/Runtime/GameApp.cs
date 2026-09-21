@@ -104,12 +104,14 @@ namespace ArrowFlow
             puzzle = kind == "campaign" ? Levels.Campaign(index) : kind == "daily" ? Levels.Daily(date) : Levels.Weekly(date, index);
             attempt = progress.GetAttempt(key);
             attempt.removed.RemoveAll(id => !puzzle.arrows.Any(a => a.id == id));
-            attempt.removed = attempt.removed.Distinct().ToList(); attempt.lives = Mathf.Clamp(attempt.lives, 0, 3);
+            attempt.removed = attempt.removed.Distinct().ToList();
+            // Keep board progress, but start each play session with three lives.
+            attempt.lives = 3;
+            Persist();
             ui.Text("Game/Title", kind == "campaign" ? "LEVEL " + index : kind == "daily" ? date.ToString("MMM d").ToUpperInvariant() : (kind == "weekly" ? "WEEKLY / " : "TOURNAMENT / ") + index);
             board.SetPuzzle(puzzle, new HashSet<int>(attempt.removed)); playing = true;
             ui.Text("Game/Status", "Tap an arrow with a clear way out"); UpdateHUD();
-            if (attempt.lives == 0) ShowFail();
-            else if (attempt.removed.Count == puzzle.arrows.Count) Win();
+            if (attempt.removed.Count == puzzle.arrows.Count) Win();
             else if (!progress.tutorialSeen) { progress.tutorialSeen = true; Persist(); ShowTutorial(); }
         }
         void UpdateHUD()
@@ -143,6 +145,7 @@ namespace ArrowFlow
         }
         void ShowFail()
         {
+            if (!playing || attempt == null || attempt.lives > 0) return;
             UpdateRefillButton();
             Dialog("Fail");
         }

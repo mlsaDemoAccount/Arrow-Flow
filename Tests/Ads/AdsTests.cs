@@ -16,7 +16,7 @@ namespace UnityEngine {
  public static class Debug { public static void LogWarning(object text) {} }
 }
 namespace GoogleMobileAds.Common {
- public static class MobileAdsEventExecutor { public static Queue<Action> Queue=new(); public static void ExecuteInUpdate(Action a)=>Queue.Enqueue(a); public static void Drain(){while(Queue.Count>0)Queue.Dequeue()();} }
+ public static class MobileAdsEventExecutor { public static bool Initialized; public static void Initialize()=>Initialized=true; public static Queue<Action> Queue=new(); public static void ExecuteInUpdate(Action a)=>Queue.Enqueue(a); public static void Drain(){if(!Initialized)throw new Exception("Callback executor not initialized before consent");while(Queue.Count>0)Queue.Dequeue()();} }
 }
 namespace GoogleMobileAds.Ump.Api {
  public enum PrivacyOptionsRequirementStatus { Unknown,Required,NotRequired }
@@ -76,7 +76,7 @@ class Program {
  static void Drain()=>MobileAdsEventExecutor.Drain();
  static void Reset(){
   foreach(var f in typeof(Ads).GetFields(BindingFlags.Static|BindingFlags.NonPublic)) f.SetValue(null,f.FieldType.IsValueType?Activator.CreateInstance(f.FieldType):null);
-  MobileAdsEventExecutor.Queue.Clear(); RewardedAd.Requests.Clear(); InterstitialAd.Requests.Clear(); MobileAds.Initializations=0; ConsentInformation.Allowed=false; ConsentInformation.Updates=0; UnityEngine.Time.realtimeSinceStartup=0; BannerView.Last=null;
+  MobileAdsEventExecutor.Initialized=false; MobileAdsEventExecutor.Queue.Clear(); RewardedAd.Requests.Clear(); InterstitialAd.Requests.Clear(); MobileAds.Initializations=0; ConsentInformation.Allowed=false; ConsentInformation.Updates=0; UnityEngine.Time.realtimeSinceStartup=0; BannerView.Last=null;
  }
  static void Start(){Reset();Ads.Initialize();ConsentInformation.Allowed=true;ConsentInformation.Callback(null);Drain();}
  static RewardedAd Ready(){var ad=new RewardedAd();RewardedAd.Requests[^1](ad,null);Drain();return ad;}
@@ -96,3 +96,4 @@ class Program {
   Console.WriteLine($"PASS: {checks} ad lifecycle assertions");
  }
 }
+
