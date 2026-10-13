@@ -1,4 +1,4 @@
-param([ValidateSet('Check','Windows','Android','AndroidBundle','IOS')][string]$Target='Check',[string]$Unity='C:\Program Files\Unity\Hub\Editor\6000.4.4f1\Editor\Unity.exe')
+param([ValidateSet('Check','Windows','Android','AndroidTestAds','AndroidBundle','IOS')][string]$Target='Check',[string]$Unity='C:\Program Files\Unity\Hub\Editor\6000.4.4f1\Editor\Unity.exe')
 $ErrorActionPreference='Stop'
 $method=if($Target -eq 'Check'){'PrepareAndValidate'}else{$Target}
 New-Item -ItemType Directory -Force (Join-Path $PSScriptRoot 'Builds') | Out-Null

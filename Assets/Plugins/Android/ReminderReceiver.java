@@ -25,7 +25,7 @@ public class ReminderReceiver extends BroadcastReceiver {
    Intent launch=context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
    PendingIntent open=PendingIntent.getActivity(context,818,launch,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
    Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(context,CHANNEL):new Notification.Builder(context);
-   b.setSmallIcon(context.getApplicationInfo().icon).setContentTitle("A little space for your mind").setContentText("Your daily Arrow Flow puzzle is waiting.").setContentIntent(open).setAutoCancel(true);
+   b.setSmallIcon(context.getApplicationInfo().icon).setContentTitle("A little space for your mind").setContentText("Your daily Arrow Attack puzzle is waiting.").setContentIntent(open).setAutoCancel(true);
    nm.notify(817,b.build());
   }setEnabled(context,true);
  }

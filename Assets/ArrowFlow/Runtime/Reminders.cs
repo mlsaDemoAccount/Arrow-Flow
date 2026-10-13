@@ -7,6 +7,7 @@ namespace ArrowFlow
     {
 #if UNITY_IOS && !UNITY_EDITOR
  [DllImport("__Internal")] static extern void ArrowFlowReminders(bool enabled);
+ const string NativeReceiver = "Arrow Attack"; // Reminders.mm sends its reply to this GameObject name.
 #endif
         public static void Set(bool enabled)
         {
@@ -19,6 +20,7 @@ namespace ArrowFlow
    bool allowed=bridge.CallStatic<bool>("allowed",activity);bridge.CallStatic("setEnabled",activity,allowed);GameApp.Instance.OnReminderPermission(allowed?"1":"denied");
   }
 #elif UNITY_IOS && !UNITY_EDITOR
+  GameApp.Instance.name = NativeReceiver;
   ArrowFlowReminders(enabled);
 #else
             GameApp.Instance.OnReminderPermission("desktop");

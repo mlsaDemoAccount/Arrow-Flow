@@ -6,3 +6,10 @@
 /Builds/
 *.csproj
 *.sln
+
+!Tests/Ads/AdsTests.csproj
+/Tests/Ads/bin/
+/Tests/Ads/obj/
+!Tests/Puzzles/PuzzleTests.csproj
+/Tests/Puzzles/bin/
+/Tests/Puzzles/obj/

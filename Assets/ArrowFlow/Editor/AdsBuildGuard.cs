@@ -18,6 +18,7 @@ namespace ArrowFlow.Editor
             if (config == null) throw new BuildFailedException("AdsConfiguration.json is invalid.");
             bool android = report.summary.platform == BuildTarget.Android;
             bool development = (report.summary.options & BuildOptions.Development) != 0;
+            if (development) config.UseGoogleTestAds();
             Validate(android ? config.androidAppId : config.iosAppId, true, development);
             Validate(android ? config.androidRewardedUnitId : config.iosRewardedUnitId, false, development);
             Validate(android ? config.androidBannerUnitId : config.iosBannerUnitId, false, development);

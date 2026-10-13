@@ -11,7 +11,7 @@ namespace ArrowFlow.Editor
 {
     public static class BuildTools
     {
-        [MenuItem("Arrow Flow/Prepare project")]
+        [MenuItem("Arrow Attack/Prepare project")]
         public static void Prepare()
         {
             Directory.CreateDirectory("Assets/Scenes");
@@ -26,8 +26,7 @@ namespace ArrowFlow.Editor
             {
                 new EditorBuildSettingsScene("Assets/Scenes/Main.unity", true)
             };
-            PlayerSettings.companyName = "ArrowFlowStudio";
-            PlayerSettings.productName = "Arrow Flow";
+            Branding.Apply();
             PlayerSettings.bundleVersion = "1.0.0";
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, "com.arrowflowstudio.arrowflow");
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.iOS, "com.arrowflowstudio.arrowflow");
@@ -45,20 +44,36 @@ namespace ArrowFlow.Editor
             PlayerSettings.Android.applicationEntry = AndroidApplicationEntry.Activity;
 #endif
             PlayerSettings.iOS.targetOSVersionString = "15.0";
-            PlayerSettings.iOS.requiresFullScreen = false;
+            // iPad runs the portrait game full screen. Older Xcode versions reject a portrait-only iPad app without
+            // this. Apple deprecated it in iPadOS 26; if iPadOS resizes the window anyway, FitDesign adapts the layout.
+            PlayerSettings.iOS.requiresFullScreen = true;
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
-            PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
+            // 64-bit phones and tablets, plus older and budget devices that run 32-bit Android.
+            PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARMv7 | AndroidArchitecture.ARM64;
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.iOS, ScriptingImplementation.IL2CPP);
             var settings = new SerializedObject(AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/ProjectSettings.asset")[0]);
-            var input = settings.FindProperty("activeInputHandler");
-            if (input != null) { input.intValue = 0; settings.ApplyModifiedPropertiesWithoutUndo(); }
+            SetSetting(settings, "activeInputHandler", 0);
+            // Every phone and tablet: iOS builds for iPhone and iPad; Android draws behind camera cutouts and lets
+            // the game resize (split screen, foldables, desktop windows). FitDesign adapts the layout to each shape.
+            SetSetting(settings, "targetDevice", 2);
+            SetSetting(settings, "androidRenderOutsideSafeArea", 1);
+            SetSetting(settings, "androidResizeableActivity", 1);
+            settings.ApplyModifiedPropertiesWithoutUndo();
             QualitySettings.vSyncCount = 0;
             QualitySettings.antiAliasing = 4;
             AssetDatabase.SaveAssets();
             Debug.Log("ARROWFLOW_PREPARED");
         }
 
-        [MenuItem("Arrow Flow/Run logic checks")]
+        static void SetSetting(SerializedObject settings, string name, int value)
+        {
+            var property = settings.FindProperty(name);
+            if (property == null) return;
+            if (property.propertyType == SerializedPropertyType.Boolean) property.boolValue = value != 0;
+            else property.intValue = value;
+        }
+
+        [MenuItem("Arrow Attack/Run logic checks")]
         public static void Validate()
         {
             string result = Checks.Run();
@@ -73,33 +88,42 @@ namespace ArrowFlow.Editor
             Validate();
         }
 
-        [MenuItem("Arrow Flow/Build Windows preview")]
+        [MenuItem("Arrow Attack/Build Windows preview")]
         public static void Windows()
         {
             Prepare();
             Validate();
-            Build("Builds/Windows/ArrowFlow.exe", BuildTarget.StandaloneWindows64);
+            Build("Builds/Windows/ArrowAttack.exe", BuildTarget.StandaloneWindows64);
         }
 
-        [MenuItem("Arrow Flow/Build Android APK")]
+        [MenuItem("Arrow Attack/Build Android APK")]
         public static void Android()
         {
             Prepare();
             Validate();
             EditorUserBuildSettings.buildAppBundle = false;
-            Build("Builds/Android/ArrowFlow.apk", BuildTarget.Android);
+            Build("Builds/Android/ArrowAttack.apk", BuildTarget.Android);
         }
 
-        [MenuItem("Arrow Flow/Build Android App Bundle")]
+        [MenuItem("Arrow Attack/Build Android Test Ads APK")]
+        public static void AndroidTestAds()
+        {
+            Prepare();
+            Validate();
+            EditorUserBuildSettings.buildAppBundle = false;
+            Build("Builds/Android/ArrowAttack-TestAds.apk", BuildTarget.Android, BuildOptions.Development);
+        }
+
+        [MenuItem("Arrow Attack/Build Android App Bundle")]
         public static void AndroidBundle()
         {
             Prepare();
             Validate();
             EditorUserBuildSettings.buildAppBundle = true;
-            Build("Builds/Android/ArrowFlow.aab", BuildTarget.Android);
+            Build("Builds/Android/ArrowAttack.aab", BuildTarget.Android);
         }
 
-        [MenuItem("Arrow Flow/Export iOS Xcode project")]
+        [MenuItem("Arrow Attack/Export iOS Xcode project")]
         public static void IOS()
         {
             Prepare();
@@ -107,10 +131,10 @@ namespace ArrowFlow.Editor
             Build("Builds/iOS", BuildTarget.iOS);
         }
 
-        static void Build(string path, BuildTarget target)
+        static void Build(string path, BuildTarget target, BuildOptions options = BuildOptions.None)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path));
-            var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions { scenes = new[] { "Assets/Scenes/Main.unity" }, locationPathName = path, target = target, options = BuildOptions.None });
+            var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions { scenes = new[] { "Assets/Scenes/Main.unity" }, locationPathName = path, target = target, options = options });
             if (report.summary.result != BuildResult.Succeeded)
                 throw new Exception("Build failed: " + report.summary.result);
             Debug.Log("ARROWFLOW_BUILD_OK " + path);

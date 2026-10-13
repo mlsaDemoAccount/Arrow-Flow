@@ -20,24 +20,108 @@ namespace ArrowFlow
         DateTime puzzleDate, calendarMonth;
         bool playing, transitioning, submitting, deleting, refilling, advancing;
         string currentScreen;
+        bool starting;
         TournamentEvent tournament;
-        AudioClip goodTone, badTone;
+
+        [Header("Q Solutions splash")]
+        [Tooltip("Seconds the Q Solutions screen stays up, including the logo zoom (never shorter than the zoom).")]
+        [SerializeField] float splashSeconds = 3f;
+        [Tooltip("Logo size when the splash appears, relative to its saved size. It zooms out to 1.")]
+        [SerializeField] float splashLogoStartScale = 1.3f;
+        [Tooltip("Seconds the logo takes to slowly zoom out and fade in.")]
+        [SerializeField] float splashLogoZoomSeconds = 2f;
+        Graphic splashLogo;
+        Vector3 splashLogoScale;
+        Vector2 splashLogoPosition;
+        Color splashLogoColor;
+
 
         void Awake()
         {
             Instance = this;
-            if (ui == null) { Debug.LogError("Assign Scene UI on Arrow Flow. Use Arrow Flow > Build scene UI to migrate an old scene.", this); enabled = false; return; }
+            if (ui == null) { Debug.LogError("Assign Scene UI on Arrow Attack. Use Arrow Attack > Build scene UI to migrate an old scene.", this); enabled = false; return; }
+            starting = true;
+            // Let every screen take this device's shape (phones, tablets, foldables) before anything stores UI positions.
+            var fit = ui.design != null ? ui.design.GetComponent<FitDesign>() : null;
+            if (fit != null) fit.MakeResponsive(ui);
+            Screen("Splash");
+            PrepareSplashLogo();
             Application.targetFrameRate = 60;
             UnityEngine.Screen.orientation = ScreenOrientation.Portrait;
             progress = SaveStore.Load();
-            Ads.Initialize();
-            goodTone = Tone(660, .09f); badTone = Tone(190, .12f);
+            if(ui.gameAudio!=null) ui.gameAudio.SetSound(progress.sound);
             ui.hero.puzzle = Levels.Tutorial(); ui.hero.interactive = false; ui.hero.hint = 1; ui.hero.Refresh();
             ui.board.tapped = Tap;
-            Home();
+            StartCoroutine(ShowEntryWhenReady());
+        }
+        IEnumerator ShowEntryWhenReady()
+        {
+#if !UNITY_EDITOR
+            // In builds, Unity's own splash is still fading out over this scene's first frames.
+            // Start the logo animation once it has gone; the cap covers platforms that never report it.
+            float unitySplashLimit = Time.realtimeSinceStartup + 1.5f;
+            while (!UnityEngine.Rendering.SplashScreen.isFinished && Time.realtimeSinceStartup < unitySplashLimit) yield return null;
+#endif
+            // Count visible rendered frames, not time spent importing, loading or unfocused.
+            // A slow first frame must not consume the entire splash duration.
+            float visibleSeconds = 0;
+            int lastRenderedFrame = Time.renderedFrameCount;
+            float splashDuration = Mathf.Max(splashSeconds, splashLogoZoomSeconds);
+            while (visibleSeconds < splashDuration)
+            {
+                yield return null;
+                int renderedFrame = Time.renderedFrameCount;
+                if (renderedFrame == lastRenderedFrame) continue;
+                lastRenderedFrame = renderedFrame;
+                if (!Application.isFocused && !Application.isBatchMode) continue;
+                visibleSeconds += Mathf.Min(Time.unscaledDeltaTime, .1f);
+                AnimateSplashLogo(visibleSeconds);
+            }
+            RestoreSplashLogo();
+            if (currentScreen == "Splash") Screen("Entry");
+            starting = false;
+            yield return null;
+            // Consent dialogs and ad initialization cannot cover the startup artwork.
+            Ads.Initialize();
+        }
+        // The Q Solutions logo starts enlarged and transparent, then zooms out to its saved layout.
+        // Only runtime values change; the scene keeps the authored size, position and color.
+        void PrepareSplashLogo()
+        {
+            foreach (var entry in ui.elements)
+                if (entry.id == "Splash/Logo") splashLogo = entry.graphic;
+            if (splashLogo == null) return;
+            var rect = splashLogo.rectTransform;
+            splashLogoScale = rect.localScale;
+            splashLogoPosition = rect.anchoredPosition;
+            splashLogoColor = splashLogo.color;
+            AnimateSplashLogo(0);
+        }
+        void AnimateSplashLogo(float seconds)
+        {
+            if (splashLogo == null) return;
+            float t = splashLogoZoomSeconds > 0 ? Mathf.Clamp01(seconds / splashLogoZoomSeconds) : 1;
+            float zoom = Mathf.Sin(t * Mathf.PI * .5f); // Gentle ease-out: slow, even zoom with a soft landing.
+            float scale = Mathf.LerpUnclamped(splashLogoStartScale, 1, zoom);
+            var rect = splashLogo.rectTransform;
+            rect.localScale = splashLogoScale * scale;
+            // Scale around the logo's center, whatever its pivot.
+            Vector2 pivotToCenter = Vector2.Scale(Vector2.Scale(new Vector2(.5f, .5f) - rect.pivot, rect.rect.size), (Vector2)splashLogoScale);
+            rect.anchoredPosition = splashLogoPosition + pivotToCenter * (1 - scale);
+            var color = splashLogoColor;
+            color.a *= Mathf.SmoothStep(0, 1, Mathf.Clamp01(t / .4f));
+            splashLogo.color = color;
+        }
+        void RestoreSplashLogo()
+        {
+            if (splashLogo == null) return;
+            splashLogo.rectTransform.localScale = splashLogoScale;
+            splashLogo.rectTransform.anchoredPosition = splashLogoPosition;
+            splashLogo.color = splashLogoColor;
         }
         void Update()
         {
+            if (starting) return;
             Ads.Tick();
             if (dialog == "Fail" && !refilling) UpdateRefillButton();
             if (dialog == "About") ui.Active("About/Privacy", Ads.PrivacyOptionsRequired);
@@ -54,7 +138,7 @@ namespace ArrowFlow
             screenVersion++; CloseDialog(); playing = false; transitioning = false;
             ui.ShowScreen(name);
             currentScreen = name;
-            Ads.SetBannerVisible(name != "Game");
+            Ads.SetBannerVisible(name != "Game" && name != "Splash" && name != "Entry");
         }
         void Dialog(string name)
         {
@@ -65,7 +149,7 @@ namespace ArrowFlow
         {
             if (submitting || deleting || refilling || advancing) return;
             dialog = null; ui.ShowDialog(null); board.interactive = true;
-            Ads.SetBannerVisible(currentScreen != "Game");
+            Ads.SetBannerVisible(currentScreen != "Game" && currentScreen != "Splash" && currentScreen != "Entry");
         }
         public void Home()
         {
@@ -73,11 +157,11 @@ namespace ArrowFlow
             Persist(); Screen("Home");
             int current = Math.Min(Levels.CampaignCount, progress.unlocked);
             bool resume = progress.attempts.Any(a => a.key == "campaign:" + current);
-            ui.Text("Home/Play/Label", (resume ? "Continue" : "Play") + "  /  Level " + current);
+            ui.Text("Home/Play/Label", (resume ? "Continue / " : "Play / Level ") + current);
         }
         public void PlayCampaign() { Play("campaign", Math.Min(Levels.CampaignCount, progress.unlocked), DateTime.Today); }
         public void ShowDaily() { Calendar(DateTime.Today); }
-        public void ShowLevels() { LevelMenu((Math.Min(Levels.CampaignCount, progress.unlocked) - 1) / 30); }
+        public void ShowLevels() { LevelMenu((Math.Min(Levels.CampaignCount, progress.unlocked) - 1) / 32); }
         public void ShowTutorial() { Dialog("Tutorial"); }
         public void ShowAbout() { Dialog("About"); ui.Active("About/Privacy", Ads.PrivacyOptionsRequired); }
         public void ShowAdPrivacy()
@@ -103,20 +187,25 @@ namespace ArrowFlow
             key = kind == "campaign" ? "campaign:" + index : kind == "daily" ? "daily:" + date.ToString("yyyy-MM-dd") : kind + ":" + Levels.WeekStart(date).ToString("yyyy-MM-dd") + ":" + index;
             puzzle = kind == "campaign" ? Levels.Campaign(index) : kind == "daily" ? Levels.Daily(date) : Levels.Weekly(date, index);
             attempt = progress.GetAttempt(key);
+            attempt.PrepareForGeneration(Levels.LayoutVersion(kind));
             attempt.removed.RemoveAll(id => !puzzle.arrows.Any(a => a.id == id));
             attempt.removed = attempt.removed.Distinct().ToList();
-            // Keep board progress, but start each play session with three lives.
-            attempt.lives = 3;
+            // Resuming keeps both the board and its remaining lives.
+            attempt.lives = Mathf.Clamp(attempt.lives, 0, 3);
+            attempt.hintsUsed = Mathf.Clamp(attempt.hintsUsed, 0, Attempt.HintLimit);
             Persist();
-            ui.Text("Game/Title", kind == "campaign" ? "LEVEL " + index : kind == "daily" ? date.ToString("MMM d").ToUpperInvariant() : (kind == "weekly" ? "WEEKLY / " : "TOURNAMENT / ") + index);
+            ui.Text("Game/Title", kind == "campaign" ? "Level " + index : kind == "daily" ? date.ToString("MMM d").ToUpperInvariant() : (kind == "weekly" ? "WEEKLY / " : "TOURNAMENT / ") + index);
             board.SetPuzzle(puzzle, new HashSet<int>(attempt.removed)); playing = true;
             ui.Text("Game/Status", "Tap an arrow with a clear way out"); UpdateHUD();
             if (attempt.removed.Count == puzzle.arrows.Count) Win();
+            else if (attempt.lives == 0) ShowFail();
             else if (!progress.tutorialSeen) { progress.tutorialSeen = true; Persist(); ShowTutorial(); }
         }
         void UpdateHUD()
         {
-            ui.Text("Game/Hearts", new string('\u2665', attempt.lives) + new string('\u2661', 3 - attempt.lives));
+            ui.Hearts(attempt.lives);
+            ui.Text("Game/Hint/Label", "Hint (" + attempt.HintsRemaining + ")");
+            ui.Interactable("Game/Hint", attempt.HintsRemaining > 0 && attempt.lives > 0);
             ui.Text("Game/Counter", (puzzle.arrows.Count - attempt.removed.Count) + " arrows remaining");
             ui.Get("Game/Progress/Fill").gameObject.transform.localScale = new Vector3((float)attempt.removed.Count / puzzle.arrows.Count, 1, 1);
         }
@@ -126,8 +215,8 @@ namespace ArrowFlow
             if (!puzzle.CanExit(id, board.removed))
             {
                 attempt.lives--; board.Error(id); Feedback(false); UpdateHUD(); Persist();
-                ui.Text("Game/Status", "That path is blocked. Follow the red guide.");
-                if (attempt.lives == 0) ShowFail(); return;
+                ui.Text("Game/Status", "Blocked! Clear the arrow in its way first.");
+                if (attempt.lives == 0) StartCoroutine(FailAfterBump(screenVersion)); return;
             }
             board.removed.Add(id); attempt.removed.Add(id); board.Exit(id); Feedback(true); UpdateHUD(); Persist();
             ui.Text("Game/Status", "A little more space.");
@@ -138,16 +227,30 @@ namespace ArrowFlow
             transitioning = true; yield return new WaitForSecondsRealtime(.55f);
             if (playing && screenVersion == version) Win();
         }
+        // After the last heart is lost, the arrow bumps into its blocker and slides back before the dialog opens.
+        IEnumerator FailAfterBump(int version)
+        {
+            transitioning = true; yield return new WaitForSecondsRealtime(board.WrongReturnSeconds + .3f);
+            if (screenVersion != version) yield break;
+            transitioning = false; ShowFail(true);
+        }
         public void Hint()
         {
-            if (!playing || transitioning || attempt.lives <= 0 || board.Animating) return;
-            board.hint = puzzle.Hint(board.removed); board.Refresh(); ui.Text("Game/Status", "The green arrow can leave safely.");
+            if (!playing || transitioning || dialog != null || attempt.lives <= 0 || board.Animating || attempt.HintsRemaining <= 0) return;
+            int id = puzzle.Hint(board.removed);
+            if (id < 0 || board.hint == id) return;
+            attempt.hintsUsed++;
+            board.hint = id; board.Refresh(); UpdateHUD(); Persist();
+            ui.Text("Game/Status", attempt.HintsRemaining == 0 ? "Last hint — the green arrow can leave safely." : "The green arrow can leave safely.");
         }
-        void ShowFail()
+        // Three gray stars and, when the last heart was just lost, a gentle "you lose" phrase.
+        void ShowFail(bool justLost = false)
         {
             if (!playing || attempt == null || attempt.lives > 0) return;
             UpdateRefillButton();
+            ui.Stars("Fail/Stars", 0);
             Dialog("Fail");
+            if (justLost && ui.gameAudio != null) { ui.gameAudio.SetSound(progress.sound); ui.gameAudio.PlayLevelFailed(); }
         }
         void UpdateRefillButton()
         {
@@ -185,16 +288,31 @@ namespace ArrowFlow
                 else { UpdateRefillButton(); ui.Text("Game/Status", "Ad wasn't completed. Watch an ad to refill, or restart."); }
             });
         }
-        public void RestartPuzzle() { progress.attempts.RemoveAll(a => a.key == key); Persist(); Play(mode, level, puzzleDate); }
+        public void RestartPuzzle()
+        {
+            // A fresh board restores lives, but cannot bypass this puzzle's hint limit.
+            attempt.removed.Clear(); attempt.lives = 3;
+            Persist(); Play(mode, level, puzzleDate);
+        }
         void Win()
         {
             transitioning = true;
             if (mode == "tournament") { RetrySubmission(); return; }
             Ads.LevelCompleted();
             progress.Complete(mode, level, puzzleDate, key); Persist();
-            ui.Text("Win/Body", mode == "daily" ? "Daily star collected.\nAnother small moment of clarity." : mode == "weekly" ? "One more puzzle toward your weekly medal." : "Every arrow found its way.");
-            ui.Text("Win/Next/Label", mode == "campaign" && level < 500 ? "Next level" : mode == "weekly" ? "Next puzzle" : "Back home");
+            // Short messages fit the dialog's single text line.
+            ui.Text("Win/Body", mode == "daily" ? "Daily star collected!" : mode == "weekly" ? "One step closer to a medal!" : "Every arrow found its way.");
+            ui.Text("Win/Next/Label", WinContinues ? (mode == "weekly" ? "Next puzzle" : "Next level") : "Back home");
+            // Three stars pop in while the jingle plays.
+            ui.Stars("Win/Stars", 3);
             Dialog("Win");
+            if (ui.gameAudio != null) { ui.gameAudio.SetSound(progress.sound); ui.gameAudio.PlayLevelComplete(); }
+        }
+        // After a win there is always something next: the following campaign level (the current one
+        // after a daily puzzle) or the next weekly puzzle, until the campaign is finished.
+        bool WinContinues
+        {
+            get { return mode == "weekly" || (mode == "campaign" ? level < Levels.CampaignCount : progress.unlocked <= Levels.CampaignCount); }
         }
         public void NextPuzzle()
         {
@@ -211,8 +329,9 @@ namespace ArrowFlow
         }
         void ContinueAfterWin()
         {
-            if (mode == "campaign" && level < 500) Play(mode, level + 1, puzzleDate);
+            if (mode == "campaign" && level < Levels.CampaignCount) Play(mode, level + 1, puzzleDate);
             else if (mode == "weekly") Play(mode, progress.WeeklyCount(puzzleDate) + 1, puzzleDate);
+            else if (mode == "daily" && progress.unlocked <= Levels.CampaignCount) Play("campaign", progress.unlocked, DateTime.Today);
             else Home();
         }
         public void Calendar(DateTime month)
@@ -244,22 +363,22 @@ namespace ArrowFlow
         }
         void LevelMenu(int pageIndex)
         {
-            Screen("Levels"); levelPage = Mathf.Clamp(pageIndex, 0, (Levels.CampaignCount - 1) / 30);
-            int start = levelPage * 30 + 1;
-            for (int i = 0; i < 30; i++)
+            Screen("Levels"); levelPage = Mathf.Clamp(pageIndex, 0, (Levels.CampaignCount - 1) / 32);
+            int start = levelPage * 32 + 1;
+            for (int i = 0; i < 32; i++)
             {
                 int n = start + i; string id = "Levels/Level" + i;
                 ui.Active(id, n <= Levels.CampaignCount); ui.Text(id + "/Label", n.ToString());
                 ui.Interactable(id, n <= progress.unlocked);
             }
-            ui.Interactable("Levels/Previous", levelPage > 0); ui.Interactable("Levels/Next", start + 30 <= Levels.CampaignCount);
+            ui.Interactable("Levels/Previous", levelPage > 0); ui.Interactable("Levels/Next", start + 32 <= Levels.CampaignCount);
         }
         public void PreviousLevelPage() { LevelMenu(levelPage - 1); }
         public void NextLevelPage() { LevelMenu(levelPage + 1); }
         public void PlayLevelSlot(int slot)
         {
-            int n = levelPage * 30 + slot + 1;
-            if (slot >= 0 && slot < 30 && n <= progress.unlocked && n <= 500) Play("campaign", n, DateTime.Today);
+            int n = levelPage * 32 + slot + 1;
+            if (slot >= 0 && slot < 32 && n <= progress.unlocked && n <= 500) Play("campaign", n, DateTime.Today);
         }
         public void Weekly()
         {
@@ -276,7 +395,7 @@ namespace ArrowFlow
             { int n = group.Count(); if (n >= 30) gold++; else if (n >= 15) silver++; else if (n >= 5) bronze++; }
             ui.Text("Trophies/Count", months.Count.ToString());
             ui.Text("Trophies/Months", months.Count == 0 ? "Your first trophy is waiting.\nComplete a full month of daily puzzles." : string.Join(" / ", months.Take(6).ToArray()));
-            ui.Text("Trophies/Medals", "Bronze  " + bronze + "     Silver  " + silver + "     Gold  " + gold);
+            ui.Text("Trophies/Medals", "BRONZE: " + bronze + "     SILVER: " + silver + "     GOLD: " + gold);
         }
         public void ShowSettings()
         {
@@ -285,7 +404,7 @@ namespace ArrowFlow
             ui.Text("Settings/Reminder/Label", "Daily reminder: " + (progress.reminders ? "On" : "Off"));
             ui.Text("Settings/SaveError", SaveStore.LastError ?? "");
         }
-        public void ToggleSound() { progress.sound = !progress.sound; Persist(); ShowSettings(); }
+        public void ToggleSound() { progress.sound = !progress.sound; if(ui.gameAudio!=null) ui.gameAudio.SetSound(progress.sound); Persist(); ShowSettings(); }
         public void ToggleHaptics() { progress.haptics = !progress.haptics; Persist(); ShowSettings(); }
         public void ToggleReminder() { Reminders.Set(!progress.reminders); }
         public void DeleteProgress() { if (!deleting) StartCoroutine(DeleteAllProgress()); }
@@ -296,7 +415,7 @@ namespace ArrowFlow
             deleting = false; ui.Interactable("Delete/Confirm", true); ui.Interactable("Delete/Cancel", true);
             if (!deleted) { Notice("Could not delete online scores", "Please reconnect and try again.\nYour progress has been kept."); yield break; }
             if (progress.reminders) Reminders.Set(false);
-            SaveStore.Delete(); progress = new Progress(); Persist(); Home();
+            SaveStore.Delete(); progress = new Progress(); if(ui.gameAudio!=null) ui.gameAudio.SetSound(progress.sound); Persist(); Home();
         }
         void Notice(string title, string body) { ui.Text("Notice/Title", title); ui.Text("Notice/Body", body); Dialog("Notice"); }
         public void OnReminderPermission(string result)
@@ -343,15 +462,9 @@ namespace ArrowFlow
             if (problem != null) { ui.Text("SubmissionError/Body", problem); Dialog("SubmissionError"); yield break; }
             progress.Complete(mode, level, puzzleDate, key); Persist(); Dialog("Submitted");
         }
-        AudioClip Tone(float frequency,float duration)
-        {
-            int samples=(int)(22050*duration);var data=new float[samples];
-            for(int i=0;i<samples;i++) data[i]=Mathf.Sin(i/22050f*frequency*Mathf.PI*2)*.15f*Mathf.Sin(Mathf.PI*i/samples);
-            var clip=AudioClip.Create("Tone",samples,1,22050,false);clip.SetData(data,0);return clip;
-        }
         void Feedback(bool correct)
         {
-            if(progress.sound) ui.audioSource.PlayOneShot(correct?goodTone:badTone);
+            if(ui.gameAudio!=null) { ui.gameAudio.SetSound(progress.sound); ui.gameAudio.PlayMove(correct); }
             if(!correct&&progress.haptics&&Application.isMobilePlatform) Handheld.Vibrate();
         }
     }

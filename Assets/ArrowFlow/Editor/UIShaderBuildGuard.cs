@@ -13,12 +13,12 @@ namespace ArrowFlow.Editor
 
         public void OnPreprocessBuild(BuildReport report) => EnsureIncluded();
 
-        [MenuItem("Arrow Flow/Repair UI shader inclusion")]
+        [MenuItem("Arrow Attack/Repair UI shader inclusion")]
         public static void EnsureIncluded()
         {
             var shader = Shader.Find("UI/Default");
             if (shader == null)
-                throw new BuildFailedException("Arrow Flow requires the built-in UI/Default shader.");
+                throw new BuildFailedException("Arrow Attack requires the built-in UI/Default shader.");
 
             var graphics = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/GraphicsSettings.asset");
             if (graphics.Length == 0)

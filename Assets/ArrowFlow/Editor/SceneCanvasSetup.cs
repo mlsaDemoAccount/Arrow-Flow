@@ -3,7 +3,7 @@ namespace ArrowFlow.Editor
 {
     public static class SceneCanvasSetup
     {
-        [MenuItem("Arrow Flow/Create scene Canvas")]
+        [MenuItem("Arrow Attack/Create scene Canvas")]
         public static void Create() { SceneUIBuilder.Build(); }
     }
 }

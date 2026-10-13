@@ -15,6 +15,19 @@ namespace ArrowFlow
         public string androidBannerUnitId, iosBannerUnitId;
         public string androidInterstitialUnitId, iosInterstitialUnitId;
         public string[] testDeviceIds;
+
+        // Official Google sample inventory, independent of our unpublished AdMob apps.
+        public void UseGoogleTestAds()
+        {
+            androidAppId = "ca-app-pub-3940256099942544~3347511713";
+            iosAppId = "ca-app-pub-3940256099942544~1458002511";
+            androidRewardedUnitId = "ca-app-pub-3940256099942544/5224354917";
+            iosRewardedUnitId = "ca-app-pub-3940256099942544/1712485313";
+            androidBannerUnitId = "ca-app-pub-3940256099942544/6300978111";
+            iosBannerUnitId = "ca-app-pub-3940256099942544/2934735716";
+            androidInterstitialUnitId = "ca-app-pub-3940256099942544/1033173712";
+            iosInterstitialUnitId = "ca-app-pub-3940256099942544/4411468910";
+        }
     }
 
     // All ad state and game callbacks are serialized onto Unity's main thread.
@@ -56,6 +69,9 @@ namespace ArrowFlow
             var asset = Resources.Load<TextAsset>("AdsConfiguration");
             config = asset == null ? new AdsConfiguration() : JsonUtility.FromJson<AdsConfiguration>(asset.text);
             config = config ?? new AdsConfiguration();
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            config.UseGoogleTestAds();
+#endif
             if (config.testDeviceIds != null && config.testDeviceIds.Length > 0)
                 MobileAds.SetRequestConfiguration(new RequestConfiguration { TestDeviceIds = new List<string>(config.testDeviceIds) });
             UpdateConsent();

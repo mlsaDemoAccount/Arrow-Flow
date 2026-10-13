@@ -20,16 +20,32 @@ namespace ArrowFlow
         public BoardView board;
         public BoardView hero;
         public AudioSource audioSource;
+        public GameAudio gameAudio;
         public List<Entry> elements = new List<Entry>();
         Dictionary<string, Entry> index;
-        public Entry Get(string id)
+        Entry Find(string id)
         {
             if (index == null) { index = new Dictionary<string, Entry>(); foreach (var e in elements) index.Add(e.id, e); }
             Entry entry;
-            if (!index.TryGetValue(id, out entry)) throw new InvalidOperationException("Missing scene UI reference: " + id + ". Open the updated Main scene or use Build scene UI.");
+            return index.TryGetValue(id, out entry) ? entry : null;
+        }
+        public Entry Get(string id)
+        {
+            var entry = Find(id);
+            if (entry == null) throw new InvalidOperationException("Missing scene UI reference: " + id + ". Open the updated Main scene or use Build scene UI.");
             return entry;
         }
         public void Text(string id, string value) { Get(id).text.text = value; }
+        public void Hearts(int lives) { ((HeartDisplay)Get("Game/Hearts").graphic).Lives = lives; }
+        // Reward stars on the Win and Fail dialogs. A scene saved before the stars existed still works;
+        // Arrow Attack > Add reward stars and jingles adds them.
+        public void Stars(string id, int earned)
+        {
+            var entry = Find(id);
+            var stars = entry != null ? entry.graphic as StarDisplay : null;
+            if (stars != null) stars.Earned = earned;
+            else Debug.LogWarning("No " + id + " stars in this scene. Use Arrow Attack > Add reward stars and jingles, or reopen Assets/Scenes/Main.unity.", this);
+        }
         public void Active(string id, bool enabled) { Get(id).gameObject.SetActive(enabled); }
         public void Interactable(string id, bool enabled) { Get(id).button.interactable = enabled; }
         public void ShowScreen(string id)
